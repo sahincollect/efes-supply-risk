@@ -1,0 +1,15 @@
+feedparser
+requests
+pandas
+numpy
+spacy
+transformers
+sentence-transformers
+bertopic
+torch
+fastapi
+uvicorn
+streamlit
+plotly
+python-dotenv
+pytest
