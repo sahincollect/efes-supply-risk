@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
+import subprocess
+import os
 
 st.set_page_config(
     page_title="Efes Tedarik Zinciri Risk Analizi",
@@ -12,38 +13,51 @@ st.set_page_config(
 st.title("Efes Tedarik Zinciri Risk Analizi")
 st.caption("Gerçek zamanlı haber tabanlı risk izleme sistemi")
 
+def run_pipeline():
+    with st.spinner("Haberler toplanıyor..."):
+        subprocess.run(["python", "src/collectors/rss_collector.py"], check=True)
+        subprocess.run(["python", "src/collectors/gdelt_collector.py"], check=True)
+    with st.spinner("NLP analizi yapılıyor..."):
+        subprocess.run(["python", "src/nlp/sentiment_analyzer.py"], check=True)
+    with st.spinner("Risk skorlanıyor..."):
+        subprocess.run(["python", "src/scoring/risk_engine.py"], check=True)
+    st.success("Pipeline tamamlandı!")
+    st.rerun()
+
 @st.cache_data
 def load_data():
     try:
         gdelt = pd.read_csv("data/processed/gdelt_scored.csv")
         rss = pd.read_csv("data/processed/articles.csv")
         return gdelt, rss
-    except Exception as e:
-        st.error(f"Veri yüklenemedi: {e}")
+    except Exception:
         return pd.DataFrame(), pd.DataFrame()
 
 gdelt, rss = load_data()
 
 if gdelt.empty:
-    st.warning("Veri bulunamadı. Önce collector ve scoring scriptlerini çalıştır.")
+    st.warning("Henüz veri yok. Pipeline'ı başlatmak için aşağıdaki butona bas.")
+    if st.button("Pipeline Başlat"):
+        run_pipeline()
     st.stop()
 
-# ===== METRIK KARTLAR =====
 col1, col2, col3, col4 = st.columns(4)
-
 kritik = len(gdelt[gdelt["alert"] == "KRITIK"])
 orta = len(gdelt[gdelt["alert"] == "ORTA"])
 dusuk = len(gdelt[gdelt["alert"] == "DUSUK"])
 ort_skor = round(gdelt["risk_score"].mean(), 1)
 
-col1.metric("Kritik Alert", kritik, delta=None)
+col1.metric("Kritik Alert", kritik)
 col2.metric("Orta Alert", orta)
 col3.metric("Düşük Risk", dusuk)
 col4.metric("Ortalama Skor", ort_skor)
 
+if st.button("Verileri Yenile"):
+    st.cache_data.clear()
+    run_pipeline()
+
 st.divider()
 
-# ===== CHARTS =====
 col_left, col_right = st.columns(2)
 
 with col_left:
@@ -68,19 +82,12 @@ with col_right:
         nbins=20,
         color_discrete_sequence=["#378ADD"]
     )
-    fig_hist.update_layout(bargap=0.1)
     st.plotly_chart(fig_hist, use_container_width=True)
 
 st.divider()
 
-# ===== EN YÜKSEK RİSKLİ HABERLER =====
 st.subheader("En Yüksek Riskli Haberler")
-
-alert_filter = st.selectbox(
-    "Filtrele",
-    options=["Tümü", "KRITIK", "ORTA", "DUSUK"]
-)
-
+alert_filter = st.selectbox("Filtrele", options=["Tümü", "KRITIK", "ORTA", "DUSUK"])
 filtered = gdelt if alert_filter == "Tümü" else gdelt[gdelt["alert"] == alert_filter]
 filtered = filtered.sort_values("risk_score", ascending=False)
 
@@ -96,7 +103,6 @@ for _, row in filtered.head(15).iterrows():
 
 st.divider()
 
-# ===== RSS HABERLERİ =====
 st.subheader("Son RSS Haberleri")
 if not rss.empty:
     st.dataframe(
